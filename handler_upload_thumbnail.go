@@ -8,6 +8,11 @@ import (
 	"github.com/google/uuid"
 	"io"
 	"encoding/base64"
+	"strings"
+	"os"
+	"path"
+	"mime"
+	"crypto/rand"
 )
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -46,20 +51,34 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	mediaType := header.Header.Get("Content-Type")
-	if mediaType == "" {
-		respondWithError(w, http.StatusBadRequest, "missing Content-Type", nil)
+	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "missing/malformed/not-allowed Content-Type", nil)
 		return
 	}
 
-	imageData, err := io.ReadAll(file)
+	extSlice := strings.Split(mediaType, "/")
+	ext := extSlice[1]
+	randBytes := make([]byte, 32)
+	rand.Read(randBytes)
+	encString := base64.RawURLEncoding.EncodeToString(randBytes)
+	thumbnailName := path.Join(cfg.assetsRoot, encString + "." + ext)
+	newFile, err := os.Create(thumbnailName)
 	if err != nil {
-		fmt.Println("failed to read thumbnail image")
+		fmt.Println("error when creating new thumbnail file in assets")
 		respondWithError(w, http.StatusInternalServerError, "", nil)
 		return
 	}
-	imageDataString := base64.StdEncoding.EncodeToString(imageData)
-	url := makeDataURL(imageDataString, mediaType, "base64")
+	defer newFile.Close()
+	
+	_, err = io.Copy(newFile, file)
+	if err != nil {
+		fmt.Println("error when copying datat to new file")
+		respondWithError(w, http.StatusInternalServerError, "", nil)
+		return
+	}
+
+	url := fmt.Sprintf("http://%s:%s/assets/%s.%s", cfg.hname, cfg.port, encString, ext)
 
 	metadata, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -81,16 +100,4 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "", nil)
 	}
 	respondWithJSON(w, http.StatusOK, metadata)
-}
-
-func makeDataURL(data, mediaType, coding string) string {
-	final := "data:"
-	if mediaType != "" {
-		final = final + mediaType
-	}
-	if coding != "" {
-		final = final + ";"+coding
-	}
-	final = final + ","+data
-	return final
 }

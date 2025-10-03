@@ -10,6 +10,11 @@ import (
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"context"
+	//"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	//"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 type apiConfig struct {
@@ -23,6 +28,7 @@ type apiConfig struct {
 	s3CfDistribution string
 	port             string
 	hname		 string
+	s3Client	 *s3.Client
 }
 
 type thumbnail struct {
@@ -86,6 +92,15 @@ func main() {
 	}
 
 	hname := os.Getenv("HNAME")
+
+	awsCfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(s3Region))
+	if err != nil {
+		log.Println("error creating aws config, exiting")
+		os.Exit(1)
+	}
+	
+	awsClient := s3.NewFromConfig(awsCfg)
+
 	cfg := apiConfig{
 		db:               db,
 		jwtSecret:        jwtSecret,
@@ -97,6 +112,7 @@ func main() {
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
 		hname:		  hname,
+		s3Client:	  awsClient,
 	}
 
 	err = cfg.ensureAssetsDir()
@@ -133,5 +149,6 @@ func main() {
 	}
 
 	log.Printf("Serving on: http://%s:%s/app/\n", hname, port)
+
 	log.Fatal(srv.ListenAndServe())
 }
